@@ -1,21 +1,15 @@
-import requests
-import nltk
-import re
-from nltk.corpus import stopwords
-imporimport requests
-import nltk
-import re
-from nltk.corpus import stopwords
-import numpy as np
+import streamlit as st
 import torch
 import torch.nn as nn
-import torch.optim as optim
-import streamlit as st
+import numpy as np
+import nltk
+import re
+from nltk.corpus import stopwords
+import requests  # Corrected import statement
 
-# Download necessary NLTK data
+# Initialize NLTK resources
 nltk.download('punkt')
 nltk.download('stopwords')
-nltk.download('punkt_tab')
 
 # Load the new dataset: Alice's Adventures in Wonderland from Project Gutenberg
 url = "https://www.gutenberg.org/files/11/11-0.txt"
