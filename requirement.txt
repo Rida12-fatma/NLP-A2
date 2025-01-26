@@ -1,7 +1,0 @@
-requests
-nltk
-pandas
-numpy
-torch
-streamlit
-pillow
