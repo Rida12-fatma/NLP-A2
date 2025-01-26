@@ -2,12 +2,12 @@ import streamlit as st
 import torch
 import torch.nn as nn
 import numpy as np
-import nltk
 import re
 from nltk.corpus import stopwords
 import requests
+import nltk
 
-# Initialize NLTK resources
+# Download necessary NLTK data (ensure punkt is available)
 nltk.download('punkt')
 nltk.download('stopwords')
 
@@ -147,3 +147,14 @@ if user_input:
         generated_text = generate_text(model, user_input)
         st.success("Generated Text:")
         st.write(generated_text)
+        
+def main():
+    st.title("Text Tokenization App")
+    
+    text = st.text_input("Enter some text:")
+    if text:
+        tokens = nltk.word_tokenize(text)
+        st.write("Tokens:", tokens)
+
+if __name__ == "__main__":
+    main()
