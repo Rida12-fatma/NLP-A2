@@ -1,57 +1,66 @@
-import streamlit as st
-import torch
-import torch.nn as nn
-import numpy as np
+import requests
 import nltk
 import re
 from nltk.corpus import stopwords
-import requests
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import streamlit as st
 
-# Initialize NLTK resources
+# Download necessary NLTK data
 nltk.download('punkt')
 nltk.download('stopwords')
+nltk.download('punkt_tab')
 
-# Load the dataset (Alice's Adventures in Wonderland)
-@st.cache_data
-def load_dataset():
-    url = "https://www.gutenberg.org/files/11/11-0.txt"
-    response = requests.get(url)
-    return response.text
+# Load the new dataset: Alice's Adventures in Wonderland from Project Gutenberg
+url = "https://www.gutenberg.org/files/11/11-0.txt"
+response = requests.get(url)
+data = response.text
 
-data = load_dataset()
+# Save the dataset to a file
+with open("alice_dataset.txt", "w", encoding="utf-8") as file:
+    file.write(data)
 
-# Preprocess the dataset
-def preprocess_text(text):
-    # Tokenization
-    tokens = nltk.word_tokenize(text)
-    # Lowercasing
-    tokens = [token.lower() for token in tokens]
-    # Remove punctuation and special characters
-    tokens = [re.sub(r'\W+', '', token) for token in tokens if re.sub(r'\W+', '', token)]
-    # Remove stop words
-    stop_words = set(stopwords.words('english'))
-    tokens = [token for token in tokens if token not in stop_words]
-    # Add special token for unknown words
-    tokens.append('<UNK>')
-    return tokens
+# Load the dataset from file
+with open('alice_dataset.txt', 'r', encoding='utf-8') as file:
+    text = file.read()
 
-tokens = preprocess_text(data)
+# Tokenization
+tokens = nltk.word_tokenize(text)
 
-# Create vocabulary and mappings
+# Lowercasing
+tokens = [token.lower() for token in tokens]
+
+# Removing punctuation and special characters
+tokens = [re.sub(r'\W+', '', token) for token in tokens if re.sub(r'\W+', '', token)]
+
+# Removing stop words (optional)
+stop_words = set(stopwords.words('english'))
+tokens = [token for token in tokens if token not in stop_words]
+
+# Add a special token for unknown words
+tokens.append('')
+
+# Numericalization
 vocab = list(set(tokens))
 word2index = {word: i for i, word in enumerate(vocab)}
 index2word = {i: word for i, word in enumerate(vocab)}
 
-# Create sequences
+# Creating sequences
 sequence_length = 5
-sequences = [
-    tokens[i:i + sequence_length] for i in range(len(tokens) - sequence_length)
-]
-input_sequences = np.array([
-    [word2index[word] for word in sequence] for sequence in sequences
-])
+sequences = []
+for i in range(len(tokens) - sequence_length):
+    sequences.append(tokens[i:i + sequence_length])
 
-# Define the Language Model
+# Convert sequences to numerical indices
+input_sequences = []
+for sequence in sequences:
+    input_sequences.append([word2index[word] for word in sequence])
+
+# Convert to numpy array
+input_sequences = np.array(input_sequences)
+
 class LanguageModel(nn.Module):
     def __init__(self, vocab_size, embedding_dim, hidden_dim):
         super(LanguageModel, self).__init__()
@@ -69,26 +78,53 @@ class LanguageModel(nn.Module):
         return (torch.zeros(2, batch_size, self.lstm.hidden_size),
                 torch.zeros(2, batch_size, self.lstm.hidden_size))
 
-# Hyperparameters and Model Initialization
+# Hyperparameters
 embedding_dim = 50
 hidden_dim = 100
 vocab_size = len(vocab)
+batch_size = 32
+epochs = 15
+
+# Model, loss function, optimizer
 model = LanguageModel(vocab_size, embedding_dim, hidden_dim)
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.Adam(model.parameters(), lr=0.001)
 
-# Load the trained model
-try:
-    model.load_state_dict(torch.load("model.pth"))
-    model.eval()
-except FileNotFoundError:
-    st.warning("Trained model file not found. Please ensure 'model.pth' is in the same directory.")
+# Training loop
+def train_model(model, input_sequences, criterion, optimizer, epochs):
+    model.train()
+    for epoch in range(epochs):
+        total_loss = 0
+        for i in range(0, len(input_sequences) - batch_size, batch_size):
+            inputs = torch.tensor(input_sequences[i:i + batch_size, :-1], dtype=torch.long)
+            targets = torch.tensor(input_sequences[i:i + batch_size, 1:], dtype=torch.long)
 
-# Generate text using the model
+            optimizer.zero_grad()
+            state_h, state_c = model.init_state(batch_size)
+            outputs, _ = model(inputs, (state_h, state_c))
+            loss = criterion(outputs.view(-1, vocab_size), targets.view(-1))
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+
+        avg_loss = total_loss / (len(input_sequences) // batch_size)
+        print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
+
+# Train the model
+train_model(model, input_sequences, criterion, optimizer, epochs)
+
+# Save the model's state dictionary
+torch.save(model.state_dict(), 'model.pth')
+print("Model saved successfully.")
+
 def generate_text(model, start_text, max_length=50):
+    model.eval()
     words = start_text.split()
     state_h, state_c = model.init_state(batch_size=1)
 
     for _ in range(max_length):
-        x = torch.tensor([[word2index.get(w, word2index['<UNK>']) for w in words]], dtype=torch.long)
+        x = torch.tensor([[word2index.get(w, word2index['']) for w in words]], dtype=torch.long)
         y_pred, (state_h, state_c) = model(x, (state_h, state_c))
         last_word_logits = y_pred[0][-1]
         p = torch.nn.functional.softmax(last_word_logits, dim=0).detach().numpy()
@@ -97,17 +133,16 @@ def generate_text(model, start_text, max_length=50):
 
     return ' '.join(words)
 
-# Streamlit Interface
-st.title("Language Model Text Generator")
-st.write("Generate text based on Alice's Adventures in Wonderland!")
+# Streamlit app interface
+st.title("Text Generation with Language Model")
+st.write("Enter a text prompt and the model will generate a continuation of the text.")
 
-start_text = st.text_input("Enter a starting phrase:", value="Alice was")
-max_length = st.slider("Select the maximum length of generated text:", 10, 100, 50)
+# Input box for user to type in a text prompt
+user_input = st.text_input("Enter text prompt:", "Harry Potter is")
 
-if st.button("Generate Text"):
-    if start_text:
-        generated_text = generate_text(model, start_text, max_length)
-        st.subheader("Generated Text:")
+# Generate text based on user input
+if user_input:
+    with st.spinner('Generating text...'):
+        generated_text = generate_text(model, user_input)
+        st.success("Generated Text:")
         st.write(generated_text)
-    else:
-        st.warning("Please enter a starting phrase.")
