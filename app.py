@@ -11,6 +11,9 @@ import requests
 nltk.download('punkt')
 nltk.download('stopwords')
 
+# Ensure punkt is loaded correctly
+from nltk.tokenize import sent_tokenize
+
 # Load the new dataset: Alice's Adventures in Wonderland from Project Gutenberg
 url = "https://www.gutenberg.org/files/11/11-0.txt"
 response = requests.get(url)
