@@ -1,160 +1,56 @@
 import streamlit as st
-import torch
-import torch.nn as nn
-import numpy as np
-import re
-from nltk.corpus import stopwords
-import requests
 import nltk
+import torch
+import os
+import gdown
+from nltk.tokenize import word_tokenize
 
-# Download necessary NLTK data (ensure punkt is available)
+# Ensure necessary NLTK data is downloaded
 nltk.download('punkt')
-nltk.download('stopwords')
+nltk.download('punkt_tab')
 
-# Ensure punkt is loaded correctly
-from nltk.tokenize import sent_tokenize
+# Function to download the model from Google Drive
+def download_model(model_url, model_path):
+    if not os.path.exists(model_path):
+        gdown.download(model_url, model_path, quiet=False)
 
-# Load the new dataset: Alice's Adventures in Wonderland from Project Gutenberg
-url = "https://www.gutenberg.org/files/11/11-0.txt"
-response = requests.get(url)
-data = response.text
-
-# Save the dataset to a file
-with open("alice_dataset.txt", "w", encoding="utf-8") as file:
-    file.write(data)
-
-# Load the dataset from file
-with open('alice_dataset.txt', 'r', encoding='utf-8') as file:
-    text = file.read()
-
-# Tokenization
-tokens = nltk.word_tokenize(text)
-
-# Lowercasing
-tokens = [token.lower() for token in tokens]
-
-# Removing punctuation and special characters
-tokens = [re.sub(r'\W+', '', token) for token in tokens if re.sub(r'\W+', '', token)]
-
-# Removing stop words (optional)
-stop_words = set(stopwords.words('english'))
-tokens = [token for token in tokens if token not in stop_words]
-
-# Add a special token for unknown words
-tokens.append('')
-
-# Numericalization
-vocab = list(set(tokens))
-word2index = {word: i for i, word in enumerate(vocab)}
-index2word = {i: word for i, word in enumerate(vocab)}
-
-# Creating sequences
-sequence_length = 5
-sequences = []
-for i in range(len(tokens) - sequence_length):
-    sequences.append(tokens[i:i + sequence_length])
-
-# Convert sequences to numerical indices
-input_sequences = []
-for sequence in sequences:
-    input_sequences.append([word2index[word] for word in sequence])
-
-# Convert to numpy array
-input_sequences = np.array(input_sequences)
-
-class LanguageModel(nn.Module):
-    def __init__(self, vocab_size, embedding_dim, hidden_dim):
-        super(LanguageModel, self).__init__()
-        self.embedding = nn.Embedding(vocab_size, embedding_dim)
-        self.lstm = nn.LSTM(embedding_dim, hidden_dim, num_layers=2, batch_first=True)
-        self.fc = nn.Linear(hidden_dim, vocab_size)
-
-    def forward(self, x, prev_state):
-        x = self.embedding(x)
-        x, state = self.lstm(x, prev_state)
-        x = self.fc(x)
-        return x, state
-
-    def init_state(self, batch_size=1):
-        return (torch.zeros(2, batch_size, self.lstm.hidden_size),
-                torch.zeros(2, batch_size, self.lstm.hidden_size))
-
-# Hyperparameters
-embedding_dim = 50
-hidden_dim = 100
-vocab_size = len(vocab)
-batch_size = 32
-epochs = 15
-
-# Model, loss function, optimizer
-model = LanguageModel(vocab_size, embedding_dim, hidden_dim)
-criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-# Training loop
-def train_model(model, input_sequences, criterion, optimizer, epochs):
-    model.train()
-    for epoch in range(epochs):
-        total_loss = 0
-        for i in range(0, len(input_sequences) - batch_size, batch_size):
-            inputs = torch.tensor(input_sequences[i:i + batch_size, :-1], dtype=torch.long)
-            targets = torch.tensor(input_sequences[i:i + batch_size, 1:], dtype=torch.long)
-
-            optimizer.zero_grad()
-            state_h, state_c = model.init_state(batch_size)
-            outputs, _ = model(inputs, (state_h, state_c))
-            loss = criterion(outputs.view(-1, vocab_size), targets.view(-1))
-            loss.backward()
-            optimizer.step()
-
-            total_loss += loss.item()
-
-        avg_loss = total_loss / (len(input_sequences) // batch_size)
-        print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
-
-# Train the model
-train_model(model, input_sequences, criterion, optimizer, epochs)
-
-# Save the model's state dictionary
-torch.save(model.state_dict(), 'model.pth')
-print("Model saved successfully.")
-
-def generate_text(model, start_text, max_length=50):
+# Load Pre-trained Model
+def load_model(model_path, vocab_size, embedding_dim=50, hidden_dim=100, output_dim=2):
+    model = TextLSTM(vocab_size, embedding_dim, hidden_dim, output_dim)
+    model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu')))
     model.eval()
-    words = start_text.split()
-    state_h, state_c = model.init_state(batch_size=1)
+    return model
 
-    for _ in range(max_length):
-        x = torch.tensor([[word2index.get(w, word2index['']) for w in words]], dtype=torch.long)
-        y_pred, (state_h, state_c) = model(x, (state_h, state_c))
-        last_word_logits = y_pred[0][-1]
-        p = torch.nn.functional.softmax(last_word_logits, dim=0).detach().numpy()
-        word_index = np.random.choice(len(last_word_logits), p=p)
-        words.append(index2word[word_index])
-
-    return ' '.join(words)
-
-# Streamlit app interface
-st.title("Text Generation with Language Model")
-st.write("Enter a text prompt and the model will generate a continuation of the text.")
-
-# Input box for user to type in a text prompt
-user_input = st.text_input("Enter text prompt:", "Harry Potter is")
-
-# Generate text based on user input
-if user_input:
-    with st.spinner('Generating text...'):
-        generated_text = generate_text(model, user_input)
-        st.success("Generated Text:")
-        st.write(generated_text)
-        
+# Streamlit App
 def main():
-    st.title("Text Tokenization App")
-    
-    text = st.text_input("Enter some text:")
-    if text:
-        tokens = nltk.word_tokenize(text)
+    st.title("Easy Model Deployment App")
+
+    # Model URL and Path
+    model_url = "https://drive.google.com/uc?export=download&id=1Ry9rh_ygoSl_j5wNNNA2NMHIX_0Gw_7Y"
+    model_path = "model.pth"
+
+    # Download Model
+    st.write("Checking for model...")
+    download_model(model_url, model_path)
+    st.write("Model downloaded successfully!")
+
+    # Load Model
+    vocab_size = 10000
+    st.write("Loading model...")
+    model = load_model(model_path, vocab_size)
+    st.write("Model loaded successfully!")
+
+    # Add an interface for tokenizing text input
+    user_input = st.text_input("Enter some text:")
+    if user_input:
+        st.write("Tokenizing text...")
+        tokens = word_tokenize(user_input)
         st.write("Tokens:", tokens)
+
+    # Add a button for model prediction
+    if st.button("Predict"):
+        # Replace with your prediction logic
+        st.write(f"Model Prediction for input: '{user_input}'")
 
 if __name__ == "__main__":
     main()
